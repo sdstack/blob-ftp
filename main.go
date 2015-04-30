@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/jehiah/go-strftime"
 	"github.com/ncw/swift"
 )
 
@@ -49,6 +51,8 @@ func handle(c net.Conn) {
 		cmd := parts[0]
 		params := strings.Join(parts[1:], "")
 		switch cmd {
+		case "MDTM":
+			s.cmdServerMdtm(params)
 		case "ABOR":
 			s.cmdServerAbor(params)
 		case "USER":
@@ -625,4 +629,41 @@ func (s *Conn) cmdServerAbor(args string) {
 		s.data.Close()
 	}
 	s.ctrl.PrintfLine(`226 Closing data connection`)
+}
+
+func (s *Conn) cmdServerMdtm(args string) {
+	fmt.Printf("cmdServerMdtm: %s\n", args)
+
+	if s.path == "/" && (len(args) == 0 || args == "/") {
+		s.ctrl.PrintfLine("213 %s", strftime.Format("%Y%m%d%H%M%S", time.Now()))
+		return
+	}
+
+	p := ""
+	cnt := ""
+
+	if args[0] == '/' {
+		cnt = strings.Split(args, "/")[1]
+		p = strings.Join(strings.Split(args, "/")[2:], "/")
+	} else {
+		if s.path != "/" {
+			cnt = strings.Split(s.path, "/")[1]
+			p = filepath.Clean(filepath.Join(strings.Join(strings.Split(s.path, "/")[2:], "/"), args))
+		} else {
+			cnt = strings.Split(args, "/")[0]
+			p = filepath.Clean(strings.Join(strings.Split(args, "/")[1:], "/"))
+		}
+	}
+	fmt.Printf("cnt: %s p: %s\n", cnt, p)
+	if p != "" {
+		obj, _, err := s.sw.Object(cnt, p)
+		if err != nil {
+			fmt.Printf(err.Error())
+			s.ctrl.PrintfLine("501 Error")
+			return
+		}
+		s.ctrl.PrintfLine("213 %s", strftime.Format("%Y%m%d%H%M%S", obj.LastModified))
+	} else {
+		s.ctrl.PrintfLine("550 Could not get file mod time.")
+	}
 }
