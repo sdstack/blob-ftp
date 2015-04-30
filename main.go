@@ -65,6 +65,8 @@ func handle(c net.Conn) {
 			s.cmdServerType(params)
 		case "LIST":
 			s.cmdServerList(params)
+		case "NLST":
+			s.cmdServerNlst(params)
 		case "SYST":
 			s.cmdServerSyst(params)
 		case "QUIT":
@@ -220,6 +222,75 @@ func (s *Conn) cmdServerList(args string) {
 	defer c.Close()
 
 	_, err = c.Write([]byte(ls.Detailed()))
+	if err != nil {
+		s.ctrl.PrintfLine("425 Data connection failed")
+		fmt.Printf(err.Error())
+		return
+	}
+	s.ctrl.PrintfLine(`226 Closing data connection`)
+}
+
+func (s *Conn) cmdServerNlst(args string) {
+	fmt.Printf("cmdServerNlst: %s\n", args)
+
+	var files []string
+	cnt := ""
+	p := ""
+	switch args {
+	case "-la", "-l", "-a", "-al":
+		args = ""
+	}
+	if len(args) > 0 && args[0] == '/' {
+		cnt = strings.Split(args, "/")[1]
+		p = strings.Join(strings.Split(args, "/")[2:], "/")
+	}
+
+	if cnt == "" && s.path == "/" {
+		cnts, err := s.sw.ContainersAll(nil)
+		if err != nil {
+			fmt.Printf(err.Error())
+			return
+		}
+		files = append(files, ".", "..")
+		for _, ct := range cnts {
+			files = append(files, ct.Name)
+		}
+	} else {
+		opts := &swift.ObjectsOpts{Delimiter: '/'}
+		cnt = strings.Split(s.path, "/")[1]
+		p = filepath.Clean(filepath.Join(strings.Join(strings.Split(s.path, "/")[2:], "/"), args))
+		fmt.Printf("cnt: %s p: %s\n", cnt, p)
+		if p != "." {
+			opts.Path = p
+		}
+		objs, err := s.sw.ObjectsAll(cnt, opts)
+		if err != nil {
+			fmt.Printf(err.Error())
+			return
+		}
+		fmt.Printf("%+v\n", objs)
+		files = append(files, ".", "..")
+
+		for _, obj := range objs {
+			if obj.PseudoDirectory || obj.ContentType == "application/directory" {
+				files = append(files, obj.Name)
+			} else {
+				files = append(files, obj.Name)
+			}
+		}
+	}
+
+	s.ctrl.PrintfLine(`150 Opening data channel for directory listing of "%s"`, args)
+	c, err := s.newSocket()
+	if err != nil {
+		fmt.Printf(err.Error())
+		s.ctrl.PrintfLine("425 Data connection failed")
+		return
+	}
+	s.data = c
+	defer c.Close()
+
+	_, err = c.Write([]byte(strings.Join(files, "\r\n")))
 	if err != nil {
 		s.ctrl.PrintfLine("425 Data connection failed")
 		fmt.Printf(err.Error())
