@@ -49,6 +49,8 @@ func handle(c net.Conn) {
 		cmd := parts[0]
 		params := strings.Join(parts[1:], "")
 		switch cmd {
+		case "ABOR":
+			s.cmdServerAbor(params)
 		case "USER":
 			s.cmdServerUser(params)
 		case "PASS":
@@ -91,10 +93,14 @@ func handle(c net.Conn) {
 			s.cmdServerMkd(params)
 		case "RMD", "XRMD":
 			s.cmdServerRmd(params)
+		case "AUTH":
+			s.cmdServerAuth(params)
 		case "STOR":
 			s.cmdServerStor(params)
 		case "SITE":
 			s.cmdServerSite(params)
+		case "NOOP":
+			s.cmdServerNoop(params)
 		default:
 			fmt.Printf("%s\n", line)
 		}
@@ -103,13 +109,13 @@ func handle(c net.Conn) {
 
 func (s *Conn) cmdServerUser(args string) {
 	fmt.Printf("cmdServerUser: %s\n", args)
-	//	s.user = args[0]
+	s.user = args
 	s.ctrl.PrintfLine("331 Password required for %s", args)
 }
 
 func (s *Conn) cmdServerPass(args string) {
 	fmt.Printf("cmdServerPass: %s\n", args)
-	//	s.token = args[0]
+	s.token = args
 	s.sw = &swift.Connection{UserName: s.user, ApiKey: s.token, AuthUrl: s.api, AuthVersion: 1}
 	err := s.sw.Authenticate()
 	if err != nil {
@@ -152,13 +158,7 @@ func (s *Conn) cmdServerType(args string) {
 
 func (s *Conn) cmdServerList(args string) {
 	fmt.Printf("cmdServerList: %s\n", args)
-	s.ctrl.PrintfLine(`150 Opening data channel for directory listing of "%s"`, args)
-	c, err := s.newSocket()
-	if err != nil {
-		fmt.Printf(err.Error())
-		s.ctrl.PrintfLine("425 Data connection failed")
-		return
-	}
+
 	var files []os.FileInfo
 	cnt := ""
 	p := ""
@@ -186,7 +186,7 @@ func (s *Conn) cmdServerList(args string) {
 		opts := &swift.ObjectsOpts{Delimiter: '/'}
 		cnt = strings.Split(s.path, "/")[1]
 		p = filepath.Clean(filepath.Join(strings.Join(strings.Split(s.path, "/")[2:], "/"), args))
-
+		fmt.Printf("cnt: %s p: %s\n", cnt, p)
 		if p != "." {
 			opts.Path = p
 		}
@@ -195,7 +195,7 @@ func (s *Conn) cmdServerList(args string) {
 			fmt.Printf(err.Error())
 			return
 		}
-
+		fmt.Printf("%+v\n", objs)
 		files = append(files, NewDirItem(".", 4096, 0), NewDirItem("..", 4096, 0))
 		var it os.FileInfo
 
@@ -209,11 +209,22 @@ func (s *Conn) cmdServerList(args string) {
 		}
 	}
 	ls := newListFormatter(files)
-	_, err = c.Write([]byte(ls.Detailed()))
+	s.ctrl.PrintfLine(`150 Opening data channel for directory listing of "%s"`, args)
+	c, err := s.newSocket()
 	if err != nil {
 		fmt.Printf(err.Error())
+		s.ctrl.PrintfLine("425 Data connection failed")
+		return
 	}
-	c.Close()
+	s.data = c
+	defer c.Close()
+
+	_, err = c.Write([]byte(ls.Detailed()))
+	if err != nil {
+		s.ctrl.PrintfLine("425 Data connection failed")
+		fmt.Printf(err.Error())
+		return
+	}
 	s.ctrl.PrintfLine(`226 Closing data connection`)
 }
 
@@ -247,6 +258,7 @@ func (s *Conn) cmdServerPasv(args string) {
 	p1 := p0 / 256
 	p2 := p0 - p1*256
 	s.port, _ = strconv.Atoi(port)
+	s.host = host
 	s.passive = true
 	s.ctrl.PrintfLine("227 Entering Passive Mode (%s,%d,%d)", strings.Replace(host, ".", ",", -1), p1, p2)
 }
@@ -269,7 +281,7 @@ func (s *Conn) newSocket() (net.Conn, error) {
 func (s *Conn) cmdServerSize(args string) {
 	fmt.Printf("cmdServerSize: %s\n", args)
 
-	if s.path == "/" && len(args) == 0 {
+	if s.path == "/" && (len(args) == 0 || args == "/") {
 		s.ctrl.PrintfLine("213 %d", 0)
 		return
 	}
@@ -288,6 +300,7 @@ func (s *Conn) cmdServerSize(args string) {
 			cnt = strings.Split(args, "/")[0]
 		}
 	}
+	fmt.Printf("cnt: %s p: %s\n", cnt, p)
 	if p != "" {
 		obj, _, err := s.sw.Object(cnt, p)
 		if err != nil {
@@ -468,6 +481,7 @@ func (s *Conn) cmdServerRetr(args string) {
 		s.ctrl.PrintfLine("425 Data connection failed")
 		return
 	}
+	s.data = c
 	defer c.Close()
 
 	_, err = s.sw.ObjectGet(cnt, p, c, false, nil)
@@ -499,6 +513,7 @@ func (s *Conn) cmdServerStor(args string) {
 		s.ctrl.PrintfLine("425 Data connection failed")
 		return
 	}
+	s.data = c
 	defer c.Close()
 
 	_, err = s.sw.ObjectPut(cnt, p, c, false, "", "", nil)
@@ -513,4 +528,24 @@ func (s *Conn) cmdServerStor(args string) {
 func (s *Conn) cmdServerSite(args string) {
 	s.ctrl.PrintfLine(`200 Success`)
 	//SITE CHMOD 0644 /public/.wgetpaste.conf
+}
+
+func (s *Conn) cmdServerAuth(args string) {
+	switch args {
+	case "TLS":
+		s.ctrl.PrintfLine(`234 AUTH TLS successful`)
+	}
+}
+
+func (s *Conn) cmdServerNoop(args string) {
+	s.ctrl.PrintfLine(`200 Success`)
+	//SITE CHMOD 0644 /public/.wgetpaste.conf
+}
+
+func (s *Conn) cmdServerAbor(args string) {
+	s.ctrl.PrintfLine(`426 Transfer abort`)
+	if s.data != nil {
+		s.data.Close()
+	}
+	s.ctrl.PrintfLine(`226 Closing data connection`)
 }

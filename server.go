@@ -9,6 +9,7 @@ import (
 
 type Conn struct {
 	ctrl    *textproto.Conn
+	data    net.Conn
 	ln      net.Listener
 	host    string
 	port    int
