@@ -168,12 +168,22 @@ func (s *Conn) cmdServerList(args string) {
 	case "-la", "-l", "-a", "-al":
 		args = ""
 	}
-	if len(args) > 0 && args[0] == '/' {
+
+	if strings.HasPrefix(args, "/") {
 		cnt = strings.Split(args, "/")[1]
 		p = strings.Join(strings.Split(args, "/")[2:], "/")
+	} else {
+		if s.path != "/" {
+			if strings.HasPrefix(s.path, "/") {
+				cnt = strings.Split(s.path, "/")[1]
+				p = args
+			}
+		} else {
+			cnt = strings.Split(args, "/")[0]
+		}
 	}
 
-	if cnt == "" && s.path == "/" {
+	if cnt == "" {
 		cnts, err := s.sw.ContainersAll(nil)
 		if err != nil {
 			fmt.Printf(err.Error())
@@ -186,8 +196,6 @@ func (s *Conn) cmdServerList(args string) {
 		}
 	} else {
 		opts := &swift.ObjectsOpts{Delimiter: '/'}
-		cnt = strings.Split(s.path, "/")[1]
-		p = filepath.Clean(filepath.Join(strings.Join(strings.Split(s.path, "/")[2:], "/"), args))
 		fmt.Printf("cnt: %s p: %s\n", cnt, p)
 		if p != "." {
 			opts.Path = p
@@ -257,8 +265,6 @@ func (s *Conn) cmdServerNlst(args string) {
 		}
 	} else {
 		opts := &swift.ObjectsOpts{Delimiter: '/'}
-		cnt = strings.Split(s.path, "/")[1]
-		p = filepath.Clean(filepath.Join(strings.Join(strings.Split(s.path, "/")[2:], "/"), args))
 		fmt.Printf("cnt: %s p: %s\n", cnt, p)
 		if p != "." {
 			opts.Path = p
@@ -290,7 +296,7 @@ func (s *Conn) cmdServerNlst(args string) {
 	s.data = c
 	defer c.Close()
 
-	_, err = c.Write([]byte(strings.Join(files, "\r\n")))
+	_, err = c.Write([]byte(strings.Join(files, "\r\n") + "\r\n"))
 	if err != nil {
 		s.ctrl.PrintfLine("425 Data connection failed")
 		fmt.Printf(err.Error())
