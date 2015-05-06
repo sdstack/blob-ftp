@@ -55,6 +55,8 @@ func handle(c net.Conn) {
 		cmd := parts[0]
 		params := strings.Join(parts[1:], "")
 		switch cmd {
+		case "CDUP":
+			s.cmdServerCdup(params)
 		case "RNFR":
 			s.cmdServerRnfr(params)
 		case "OPTS":
@@ -417,7 +419,12 @@ func (s *Conn) cmdServerCwd(args string) {
 		s.path = filepath.Clean(args)
 	}
 	s.ctrl.PrintfLine(`250 "%s" is current directory.`, s.path)
+}
 
+func (s *Conn) cmdServerCdup(args string) {
+	fmt.Printf("cmdServerCdup: %s\n", args)
+	s.path = filepath.Dir(s.path)
+	s.ctrl.PrintfLine(`250 "%s" is current directory.`, s.path)
 }
 
 func (s *Conn) cmdServerPort(args string) {
