@@ -544,14 +544,22 @@ func (s *Conn) cmdServerMkd(args string) {
 	}
 
 	if p != "" && p != "." {
-		var f *swift.ObjectCreateFile
-		f, err = s.sw.ObjectCreate(cnt, p, false, "", "application/directory", nil)
+		path := ""
+		for _, part := range strings.Split(filepath.Clean(p), "/") {
+			path = filepath.Join(path, part)
+			var f *swift.ObjectCreateFile
+			f, err = s.sw.ObjectCreate(cnt, path, false, "", "application/directory", nil)
+			if err != nil {
+				fmt.Printf(err.Error())
+				s.ctrl.PrintfLine(`550 Create failed "%s"`, args)
+				return
+			}
+			err = f.Close()
+		}
 		if err != nil {
-			fmt.Printf(err.Error())
 			s.ctrl.PrintfLine(`550 Create failed "%s"`, args)
 			return
 		}
-		err = f.Close()
 	} else {
 		err = s.sw.ContainerCreate(cnt, nil)
 	}
@@ -639,13 +647,32 @@ func (s *Conn) cmdServerSite(args string) {
 }
 
 func (s *Conn) cmdServerRnfr(args string) {
-	//	s.Src = args
-	s.ctrl.PrintfLine(`550 Success`)
+	if args[0] == '/' {
+		s.movesrc = args
+	} else {
+		s.movesrc = filepath.Clean(filepath.Join(s.path, args))
+	}
+	s.ctrl.PrintfLine(`200 Success`)
 }
 
 func (s *Conn) cmdServerRnto(args string) {
-	//	s.Dst = args
-	s.ctrl.PrintfLine(`550 Success`)
+	var err error
+	if args[0] == '/' {
+		s.movedst = args
+	} else {
+		s.movedst = filepath.Clean(filepath.Join(s.path, args))
+	}
+	cntsrc := strings.Split(s.movesrc, "/")[1]
+	psrc := strings.Join(strings.Split(s.movesrc, "/")[2:], "/")
+	cntdst := strings.Split(s.movedst, "/")[1]
+	pdst := strings.Join(strings.Split(s.movedst, "/")[2:], "/")
+	if err = s.sw.ObjectMove(cntsrc, psrc, cntdst, pdst); err != nil {
+		s.ctrl.PrintfLine("552 Failed to store file")
+		return
+	}
+	s.movesrc = ""
+	s.movedst = ""
+	s.ctrl.PrintfLine(`200 Success`)
 }
 
 func (s *Conn) cmdServerAuth(args string) {

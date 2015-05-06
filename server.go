@@ -20,6 +20,8 @@ type Conn struct {
 	path    string
 	api     string
 	passive bool
+	movesrc string
+	movedst string
 }
 
 func (c *Conn) Close() error {
