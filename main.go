@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	l, err := net.Listen("tcp4", ":21")
+	l, err := net.Listen("tcp4", "37.139.40.30:21")
 	if err != nil {
 		panic(err)
 
@@ -48,9 +48,15 @@ func handle(c net.Conn) {
 			return
 		}
 		parts := strings.Fields(line)
+		if len(parts) < 1 {
+			fmt.Printf("%s\n", line)
+			s.Close()
+		}
 		cmd := parts[0]
 		params := strings.Join(parts[1:], "")
 		switch cmd {
+		case "OPTS":
+			s.cmdServerOpts(params)
 		case "MDTM":
 			s.cmdServerMdtm(params)
 		case "ABOR":
@@ -109,6 +115,8 @@ func handle(c net.Conn) {
 			s.cmdServerNoop(params)
 		default:
 			fmt.Printf("%s\n", line)
+			s.Close()
+			return
 		}
 	}
 }
@@ -141,7 +149,7 @@ func (s *Conn) cmdServerPwd(args string) {
 func (s *Conn) cmdServerEpsv(args string) {
 	fmt.Printf("cmdServerEpsv: %s\n", args)
 	if s.ln == nil {
-		ln, err := net.Listen("tcp4", fmt.Sprintf(":%d", s.port))
+		ln, err := net.Listen("tcp4", fmt.Sprintf("37.139.40.30:%d", s.port))
 		if err != nil {
 			fmt.Printf(err.Error())
 			s.ctrl.PrintfLine("425 Data connection failed")
@@ -327,7 +335,7 @@ func (s *Conn) cmdServerQuit(args string) {
 func (s *Conn) cmdServerPasv(args string) {
 	fmt.Printf("cmdServerPasv: %s\n", args)
 	if s.ln == nil {
-		ln, err := net.Listen("tcp4", fmt.Sprintf(":%d", s.port))
+		ln, err := net.Listen("tcp4", fmt.Sprintf("37.139.40.30:%d", s.port))
 		if err != nil {
 			fmt.Printf("%s\n", err.Error())
 			s.ctrl.PrintfLine("425 Data connection failed")
@@ -418,6 +426,10 @@ func (s *Conn) cmdServerEprt(args string) {
 	s.ctrl.PrintfLine("200 Ok")
 }
 
+func (s *Conn) cmdServerOpts(args string) {
+	s.ctrl.PrintfLine("200 Ok")
+}
+
 func (s *Conn) cmdServerLprt(args string) {
 	fmt.Printf("cmdServerLprt: %s\n", args)
 	s.ctrl.PrintfLine("522 Data connection failed")
@@ -430,22 +442,23 @@ func (s *Conn) cmdServerLpsv(args string) {
 
 func (s *Conn) cmdServerFeat(args string) {
 	fmt.Printf("cmdServerFeat: %s\n", args)
-	s.ctrl.PrintfLine("501 Data connection failed")
-	return
+	//	s.ctrl.PrintfLine("501 Data connection failed")
+	//	return
 	s.ctrl.PrintfLine(`211-Extensions supported:
-    SIZE
-    RETR
-    CWD
-    PWD
-    QUIT
-    SYST
-    PASV
-    EPSV
-    LIST
-    TYPE
-    USER
-    PASS
-    UTF8
+ SIZE
+ RETR
+ CWD
+ PWD
+ QUIT
+ SYST
+ PASV
+ EPSV
+ LIST
+ TYPE
+ USER
+ PASS
+ UTF8
+ MDTM
 211 END`)
 }
 
@@ -486,9 +499,13 @@ func (s *Conn) cmdServerRmd(args string) {
 		if s.path != "/" {
 			cnt = strings.Split(s.path, "/")[1]
 			p = filepath.Clean(filepath.Join(strings.Join(strings.Split(s.path, "/")[2:], "/"), args))
+		} else {
+			cnt = strings.Split(args, "/")[0]
+			p = filepath.Clean(filepath.Join(s.path, strings.Join(strings.Split(args, "/")[1:], "/")))
 		}
 	}
-	if p != "" && p != "." {
+	fmt.Printf("cnt %s p %s\n", cnt, p)
+	if p != "" && p != "." && p != "/" {
 		err = s.sw.ObjectDelete(cnt, p)
 	} else {
 		err = s.sw.ContainerDelete(cnt)
