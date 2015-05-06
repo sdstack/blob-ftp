@@ -55,6 +55,8 @@ func handle(c net.Conn) {
 		cmd := parts[0]
 		params := strings.Join(parts[1:], "")
 		switch cmd {
+		case "RNFR":
+			s.cmdServerRnfr(params)
 		case "OPTS":
 			s.cmdServerOpts(params)
 		case "MDTM":
@@ -181,20 +183,21 @@ func (s *Conn) cmdServerList(args string) {
 		args = ""
 	}
 
-	if strings.HasPrefix(args, "/") {
+	if len(args) > 0 && args[0] == '/' {
 		cnt = strings.Split(args, "/")[1]
 		p = strings.Join(strings.Split(args, "/")[2:], "/")
 	} else {
 		if s.path != "/" {
-			if strings.HasPrefix(s.path, "/") {
-				cnt = strings.Split(s.path, "/")[1]
-				p = args
-			}
+			cnt = strings.Split(s.path, "/")[1]
+			p = args
+			fmt.Printf("cnt1 path %s cnt %s p %s\n", s.path, cnt, p)
 		} else {
+			fmt.Printf("cnt2 %s\n", s.path)
 			cnt = strings.Split(args, "/")[0]
+			p = strings.Join(strings.Split(args, "/")[1:], "/")
 		}
 	}
-
+	fmt.Printf("cnt3 %s p %s\n", cnt, p)
 	if cnt == "" {
 		cnts, err := s.sw.ContainersAll(nil)
 		if err != nil {
@@ -207,8 +210,11 @@ func (s *Conn) cmdServerList(args string) {
 			files = append(files, it)
 		}
 	} else {
+		if p == "" {
+			p = filepath.Clean(strings.Join(strings.Split(s.path, "/")[2:], "/"))
+		}
 		opts := &swift.ObjectsOpts{Delimiter: '/'}
-		fmt.Printf("cnt: %s p: %s\n", cnt, p)
+		fmt.Printf("cnt4: %s p: %s\n", cnt, p)
 		if p != "." {
 			opts.Path = p
 		}
@@ -405,7 +411,11 @@ func (s *Conn) cmdServerSize(args string) {
 
 func (s *Conn) cmdServerCwd(args string) {
 	fmt.Printf("cmdServerCwd: %s\n", args)
-	s.path = filepath.Clean("/" + args)
+	if args[0] != '/' {
+		s.path = filepath.Clean(filepath.Join(s.path, args))
+	} else {
+		s.path = filepath.Clean(args)
+	}
 	s.ctrl.PrintfLine(`250 "%s" is current directory.`, s.path)
 
 }
@@ -626,6 +636,16 @@ func (s *Conn) cmdServerStor(args string) {
 func (s *Conn) cmdServerSite(args string) {
 	s.ctrl.PrintfLine(`200 Success`)
 	//SITE CHMOD 0644 /public/.wgetpaste.conf
+}
+
+func (s *Conn) cmdServerRnfr(args string) {
+	//	s.Src = args
+	s.ctrl.PrintfLine(`550 Success`)
+}
+
+func (s *Conn) cmdServerRnto(args string) {
+	//	s.Dst = args
+	s.ctrl.PrintfLine(`550 Success`)
 }
 
 func (s *Conn) cmdServerAuth(args string) {
