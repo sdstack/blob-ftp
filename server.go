@@ -14,7 +14,7 @@ var schema []string = []string{
 	`CREATE TABLE IF NOT EXISTS containers (ID int, Name string, Bytes int, Count int)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS containersID ON containers (ID)`,
 	`CREATE INDEX IF NOT EXISTS containersName ON containers (Name)`,
-	`CREATE TABLE IF NOT EXISTS objects (ID int, Container string, Prefix string, ContentType string, LastModified time, Name string, Bytes int, Count int)`,
+	`CREATE TABLE IF NOT EXISTS objects (ID int, Container string, Prefix string, ContentType string, LastModified time, Name string, Bytes int, Count int, SubDir string, PseudoDir bool)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS objectsID ON objects (ID)`,
 	`CREATE INDEX IF NOT EXISTS objectsName ON objects (Name)`,
 	`CREATE INDEX IF NOT EXISTS objectsContainer ON objects (Container)`,
@@ -102,7 +102,7 @@ func (c *Conn) saveObjects(cnt string, objs []swift.Object, opts *swift.ObjectsO
 	}
 
 	for _, obj := range objs {
-		if _, err = tx.Exec(`INSERT INTO objects (Container, Prefix, ContentType, LastModified,  Name, Bytes, Count) VALUES ($1, $2, $3, $4, $5, $6, $7)`, cnt, opts.Prefix, obj.ContentType, obj.LastModified, obj.Name, obj.Bytes, 1); err != nil {
+		if _, err = tx.Exec(`INSERT INTO objects (Container, Prefix, ContentType, LastModified,  Name, Bytes, Count, PseudoDir, SubDir) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, cnt, opts.Prefix, obj.ContentType, obj.LastModified, obj.Name, obj.Bytes, 1, obj.PseudoDirectory, obj.SubDir); err != nil {
 			fmt.Printf("aaaa %s\n", err.Error())
 			return err
 		}
@@ -119,7 +119,7 @@ func (c *Conn) loadObjects(cnt string, opts *swift.ObjectsOpts) ([]swift.Object,
 	var objs []swift.Object
 	var res swift.Object
 
-	result, err := c.db.Query(`SELECT ContentType, LastModified, Name, Bytes from objects where Container==$1 && Prefix==$1`, cnt, opts.Prefix)
+	result, err := c.db.Query(`SELECT ContentType, LastModified, Name, Bytes, PseudoDir, SubDir from objects where Container==$1 && Prefix==$2`, cnt, opts.Prefix)
 	if err != nil {
 		fmt.Printf("bbb %s\n", err.Error())
 		return objs, err
@@ -127,7 +127,7 @@ func (c *Conn) loadObjects(cnt string, opts *swift.ObjectsOpts) ([]swift.Object,
 	defer result.Close()
 
 	for result.Next() {
-		if err = result.Scan(&res.ContentType, &res.LastModified, &res.Name, &res.Bytes); err != nil {
+		if err = result.Scan(&res.ContentType, &res.LastModified, &res.Name, &res.Bytes, &res.PseudoDirectory, &res.SubDir); err != nil {
 			fmt.Printf("%s\n", err.Error())
 			return objs, err
 		}

@@ -248,26 +248,26 @@ func (s *Conn) cmdServerList(args string) {
 				opts.Prefix += "/"
 			}
 		}
-		objs, err := s.loadObjects(cnt, opts)
+		//		objs, err := s.loadObjects(cnt, opts)
+		//		if err != nil {
+		objs, err := s.sw.ObjectsAll(cnt, opts)
 		if err != nil {
-			objs, err = s.sw.ObjectsAll(cnt, opts)
-			if err != nil {
-				fmt.Printf(err.Error())
-				return
-			}
-			s.saveObjects(cnt, objs, opts)
+			fmt.Printf(err.Error())
+			return
 		}
+		s.saveObjects(cnt, objs, opts)
+		//		}
 		fmt.Printf("%+v\n", objs)
 		files = append(files, NewDirItem(".", 4096, 0), NewDirItem("..", 4096, 0))
 		var it os.FileInfo
 
 		for _, obj := range objs {
-			if obj.SubDir != "" || strings.Index(obj.Name, "/") > 0 {
-				continue
-			}
-			if obj.PseudoDirectory || obj.ContentType == "application/directory" {
+			obj.Name = strings.TrimPrefix(obj.Name, opts.Prefix)
+			if obj.PseudoDirectory || obj.ContentType == "application/directory" || obj.SubDir != "" {
+				fmt.Printf("AAAAAA: %+v\n", obj)
 				it = NewDirItem(obj.Name, obj.Bytes, 1)
 			} else {
+				fmt.Printf("BBBBBBBB: %+v\n", obj)
 				it = NewFileItem(obj.Name, obj.Bytes, 1)
 			}
 			files = append(files, it)
