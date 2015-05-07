@@ -45,7 +45,7 @@ func (c *Conn) Close() error {
 
 func NewServer(c net.Conn) (*Conn, error) {
 	var err error
-	conn := &Conn{api: "https://api.clodo.ru", user: "storage_21_1", token: "56652e9028ded5ea5d4772ba80e578ce", ctrl: textproto.NewConn(c), path: "/"}
+	conn := &Conn{api: "https://api.clodo.ru", ctrl: textproto.NewConn(c), path: "/"}
 	conn.db, err = sql.Open("ql", "memory://mem.db")
 	if err != nil {
 		return nil, err
