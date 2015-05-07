@@ -40,6 +40,14 @@ func handle(c net.Conn) {
 	if err != nil {
 		fmt.Printf(err.Error())
 	}
+	/*
+	   s.cache = groupcache.NewGroup("cache", 10 * 1024, groupcache.GetterFunc(
+	           func(ctx groupcache.Context, key string, dest groupcache.Sink) error {
+	                   contents, err := ioutil.ReadFile(key)
+	                   dest.SetBytes(contents)
+	                   return err
+	           }))
+	*/
 	s.ctrl.PrintfLine("220 %s [%s]", "go-ftp", c.LocalAddr())
 	for {
 		line, err := s.ctrl.ReadLine()
@@ -59,6 +67,8 @@ func handle(c net.Conn) {
 			s.cmdServerCdup(params)
 		case "RNFR":
 			s.cmdServerRnfr(params)
+		case "RNTO":
+			s.cmdServerRnto(params)
 		case "OPTS":
 			s.cmdServerOpts(params)
 		case "MDTM":
@@ -87,6 +97,8 @@ func handle(c net.Conn) {
 			s.cmdServerQuit(params)
 			s.Close()
 			return
+		case "HELP":
+			s.cmdServerHelp(params)
 		case "SIZE":
 			s.cmdServerSize(params)
 		case "CWD", "XCWD":
@@ -191,20 +203,33 @@ func (s *Conn) cmdServerList(args string) {
 	} else {
 		if s.path != "/" {
 			cnt = strings.Split(s.path, "/")[1]
-			p = args
+			if len(args) > 0 {
+				p = args
+			} else {
+				p = filepath.Clean(strings.Join(strings.Split(s.path, "/")[2:], "/"))
+			}
 			fmt.Printf("cnt1 path %s cnt %s p %s\n", s.path, cnt, p)
 		} else {
 			fmt.Printf("cnt2 %s\n", s.path)
-			cnt = strings.Split(args, "/")[0]
-			p = strings.Join(strings.Split(args, "/")[1:], "/")
+			if len(args) > 0 {
+				cnt = strings.Split(args, "/")[0]
+				p = strings.Join(strings.Split(args, "/")[1:], "/")
+			} else {
+				cnt = strings.Split(s.path, "/")[1]
+				p = filepath.Clean(strings.Join(strings.Split(s.path, "/")[2:], "/"))
+			}
 		}
 	}
 	fmt.Printf("cnt3 %s p %s\n", cnt, p)
 	if cnt == "" {
-		cnts, err := s.sw.ContainersAll(nil)
+		cnts, err := s.loadContainers()
 		if err != nil {
-			fmt.Printf(err.Error())
-			return
+			cnts, err = s.sw.ContainersAll(nil)
+			if err != nil {
+				fmt.Printf(err.Error())
+				return
+			}
+			s.saveContainers(cnts)
 		}
 		files = append(files, NewDirItem(".", 4096, 0), NewDirItem("..", 4096, 0))
 		for _, ct := range cnts {
@@ -218,18 +243,28 @@ func (s *Conn) cmdServerList(args string) {
 		opts := &swift.ObjectsOpts{Delimiter: '/'}
 		fmt.Printf("cnt4: %s p: %s\n", cnt, p)
 		if p != "." {
-			opts.Path = p
+			opts.Prefix = p
+			if !strings.HasSuffix(opts.Prefix, "/") {
+				opts.Prefix += "/"
+			}
 		}
-		objs, err := s.sw.ObjectsAll(cnt, opts)
+		objs, err := s.loadObjects(cnt, opts)
 		if err != nil {
-			fmt.Printf(err.Error())
-			return
+			objs, err = s.sw.ObjectsAll(cnt, opts)
+			if err != nil {
+				fmt.Printf(err.Error())
+				return
+			}
+			s.saveObjects(cnt, objs, opts)
 		}
 		fmt.Printf("%+v\n", objs)
 		files = append(files, NewDirItem(".", 4096, 0), NewDirItem("..", 4096, 0))
 		var it os.FileInfo
 
 		for _, obj := range objs {
+			if obj.SubDir != "" || strings.Index(obj.Name, "/") > 0 {
+				continue
+			}
 			if obj.PseudoDirectory || obj.ContentType == "application/directory" {
 				it = NewDirItem(obj.Name, obj.Bytes, 1)
 			} else {
@@ -274,10 +309,14 @@ func (s *Conn) cmdServerNlst(args string) {
 	}
 
 	if cnt == "" && s.path == "/" {
-		cnts, err := s.sw.ContainersAll(nil)
+		cnts, err := s.loadContainers()
 		if err != nil {
-			fmt.Printf(err.Error())
-			return
+			cnts, err = s.sw.ContainersAll(nil)
+			if err != nil {
+				fmt.Printf(err.Error())
+				return
+			}
+			s.saveContainers(cnts)
 		}
 		files = append(files, ".", "..")
 		for _, ct := range cnts {
@@ -289,10 +328,14 @@ func (s *Conn) cmdServerNlst(args string) {
 		if p != "." {
 			opts.Path = p
 		}
-		objs, err := s.sw.ObjectsAll(cnt, opts)
+		objs, err := s.loadObjects(cnt, opts)
 		if err != nil {
-			fmt.Printf(err.Error())
-			return
+			objs, err = s.sw.ObjectsAll(cnt, opts)
+			if err != nil {
+				fmt.Printf(err.Error())
+				return
+			}
+			s.saveObjects(cnt, objs, opts)
 		}
 		fmt.Printf("%+v\n", objs)
 		files = append(files, ".", "..")
@@ -663,6 +706,7 @@ func (s *Conn) cmdServerRnfr(args string) {
 }
 
 func (s *Conn) cmdServerRnto(args string) {
+	fmt.Printf("cmdServerRnto: %s\n", args)
 	var err error
 	if args[0] == '/' {
 		s.movedst = args
@@ -673,6 +717,9 @@ func (s *Conn) cmdServerRnto(args string) {
 	psrc := strings.Join(strings.Split(s.movesrc, "/")[2:], "/")
 	cntdst := strings.Split(s.movedst, "/")[1]
 	pdst := strings.Join(strings.Split(s.movedst, "/")[2:], "/")
+
+	fmt.Printf("%s %s %s %s\n", cntsrc, psrc, cntdst, pdst)
+
 	if err = s.sw.ObjectMove(cntsrc, psrc, cntdst, pdst); err != nil {
 		s.ctrl.PrintfLine("552 Failed to store file")
 		return
@@ -687,6 +734,10 @@ func (s *Conn) cmdServerAuth(args string) {
 	case "TLS":
 		s.ctrl.PrintfLine(`234 AUTH TLS successful`)
 	}
+}
+
+func (s *Conn) cmdServerHelp(args string) {
+	s.ctrl.PrintfLine(`200 Success`)
 }
 
 func (s *Conn) cmdServerNoop(args string) {
